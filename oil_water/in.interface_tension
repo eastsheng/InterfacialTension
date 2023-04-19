@@ -1,0 +1,110 @@
+# ---------------------------------------------------
+# ----------------- 
+# ----------------- Variable Section-----------------
+variable  k     equal 1
+#variable  k     index 1 2 3
+variable  T0    equal 300  #K
+# ----------------- Init Section -----------------
+log  log_relax_${k}.lammps
+units        real
+boundary p p p
+dimension 3
+atom_style      full
+bond_style      hybrid harmonic
+angle_style     hybrid harmonic
+dihedral_style  hybrid opls
+improper_style  none
+pair_style      hybrid sw lj/cut 10.0
+pair_modify     mix geometric
+#special_bonds   lj 0.0 0.0 0.0
+# ----------------- Atom Definition Section -----------------
+
+read_data "system.data"
+
+# ----------------- Settings Section -----------------
+pair_coeff    * * sw system.in.sw mW NULL NULL  #(mW+3 other atom types)
+pair_coeff 2 2 lj/cut   0.091411522 3.95 # CH2
+pair_coeff 3 3 lj/cut   0.194746286 3.75 # CH3
+
+pair_coeff 1 2 lj/cut 0.11914784667210733 3.558 # water-CH2
+pair_coeff 1 3 lj/cut 0.17390830404497651 3.458 # water-CH3
+
+bond_coeff   1   harmonic  120.0      1.54
+angle_coeff  1   harmonic  62.0022    114
+dihedral_coeff 1 opls 1.411036 -0.271016 3.145034 0.0
+
+# ----------------- Group settings -----------------
+group WatMW type 1
+group TraPPE type 2 3
+
+# ----------------- Run Section -----------------
+thermo 100
+thermo_style  custom step density temp press pxx pyy pzz pe ke etotal
+
+neighbor               2.0 bin
+neigh_modify every 1 delay 10 check yes
+
+#  -- minimize --
+minimize  0.0 1.0e-8 1000 100000
+min_style sd #steepest descent algorithm
+
+write_data ${k}_mini.data
+
+timestep 3.0
+
+#----------------- nvt relax -----------------
+reset_timestep 0
+
+velocity   all  create  300 $k928459
+
+thermo 100
+thermo_style  custom step density temp press pxx pyy pzz pe ke etotal
+dump 1 all custom 1000 traj_nvt_relax_${T0}_$k.lammpstrj id mol type x y z
+dump_modify 1 sort id
+
+fix   N2 all nvt temp ${T0} ${T0} 100
+
+run   100000
+
+write_data ${k}_relax_nvt_${T0}.data
+unfix N2
+undump 1
+
+#----------------- NPT relax -----------------
+reset_timestep 0
+
+thermo 100
+thermo_style  custom step density temp press pxx pyy pzz pe ke etotal
+dump 1 all custom 1000 traj_npt_relax_${T0}_$k.lammpstrj id mol type x y z
+dump_modify 1 sort id
+
+fix   N2 all npt temp ${T0} ${T0} 100 iso 1.0 1.0 1000
+
+run   100000
+
+write_data ${k}_relax_npt_${T0}.data
+unfix N2
+undump 1
+
+# ----------------- Interfacial tensions -----------------
+reset_timestep 0
+
+thermo 100
+thermo_style  custom step density temp press pxx pyy pzz pe ke etotal
+dump 2 all custom 1000 traj_nvt_IFT_${T0}_$k.lammpstrj id mol type x y z
+dump_modify 2 sort id
+
+fix   N2 all nvt temp ${T0} ${T0} 100
+
+compute myp1 all stress/atom NULL
+
+compute myc1 all chunk/atom bin/1d z 0.0 1.0 units box
+
+fix s1 all ave/chunk 1 1000000 1000000 myc1 density/mass c_myp1[1] c_myp1[2] c_myp1[3] norm sample file ${k}_press_all.profile
+
+run   1000000
+
+write_data ${k}_nvt_${T0}.data
+
+#next k
+#jump in.interface_tension
